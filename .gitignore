@@ -118,6 +118,8 @@ dmypy.json
 profile.txt
 /test
 *.bat
+!debug.bat
+!info.bat
 users.txt
 test.py
 subreddits.txt
