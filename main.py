@@ -139,12 +139,13 @@ def creation_process():
     logger.info(f"Received {len(initialUserCollection)} users")
 
     # Get comments from each post
-    commentUsers = handle_errors(
+    commentUsers, comments = handle_errors(
         get_post_comments,
         startSubmissions,
         limit=args["postCommentLimit"],
     )
     logger.info(f"Got {len(commentUsers)} users")
+    logger.info(f"Got {len(comments)} initial comments")
 
     initialUserCollection += commentUsers
     del commentUsers
@@ -154,6 +155,9 @@ def creation_process():
     if tmp == 0:
         logger.critical("No initial users were collected (excessive blocking?)")
         sys.exit(1)
+
+    # Dump scraped comments to database
+    layerHandler.dump_data(comments)
 
     # Dump to layer 1
     layerHandler.dump_build_layer(1, initialUserCollection)

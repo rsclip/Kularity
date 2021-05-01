@@ -167,7 +167,7 @@ def get_post_comments(submission, limit=5000):
         # submission.comments.replace_more(limit=None)
         queue = submission.comments[:]
 
-        data = []
+        data, comments = [], []
         while queue and limit > len(data):
             try:
                 comment = queue.pop(0)
@@ -178,6 +178,12 @@ def get_post_comments(submission, limit=5000):
                     data.append(comment.author)
                 if limit > len(data):
                     queue.extend(comment.replies)
+                    comments.append(
+                        {
+                            "comment": comment.body,
+                            "score": comment.score,
+                        }
+                    )
             except Exception:
                 break
 
@@ -185,7 +191,7 @@ def get_post_comments(submission, limit=5000):
             logger.debug(
                 f"Got {skw}{len(data)}{ekw}/{skw}{limit}{ekw} comments from {skw}{submission.id}"
             )
-        return tuple(dict.fromkeys(data))
+        return tuple(dict.fromkeys(data)), comments
 
     def handleIteration(s, i, _max):
         data = getData(s)
