@@ -195,16 +195,17 @@ def get_post_comments(submission, limit=5000):
 
     def handleIteration(s, i, _max):
         data = getData(s)
-        progress_bar(i + 1, _max)
+        progress_bar(i + 1, _max, start="Getting comments: ")
         return data
 
     if isinstance(submission, (list, tuple)):
         _max = len(submission)
-        return list(
-            from_iterable(
-                [handleIteration(s, i, _max) for i, s in enumerate(submission)]
-            )
+        rv = [handleIteration(s, i, _max) for i, s in enumerate(submission)]
+        a, b = tuple(from_iterable([i[0] for i in rv])), tuple(
+            from_iterable([i[1] for i in rv])
         )
+        # rv = list(from_iterable(comments))
+        return a, b
     else:
         return getData(submission)
 
@@ -301,6 +302,7 @@ def get_user_comments(
                         baseCommentsSaved[0] + len(commentData),
                         maxCommentsSaved,
                         alwaysReturn=True,
+                        start=f"Getting u/{user.name} comments: ",
                     )
             except AttributeError:
                 # NoneType (user is deleted or banned)
@@ -324,7 +326,9 @@ def get_user_comments(
         listIter = user[:limitUsers]
         maxCommentsSaved = len(listIter) * limit  # Target comments (max)
         baseCommentsSaved = 0
-        progress_bar(baseCommentsSaved, maxCommentsSaved)
+        progress_bar(
+            baseCommentsSaved, maxCommentsSaved, start="Getting user comments: "
+        )
 
         for i, u in enumerate(listIter):
             tmpSubmission, tmpComment = getData(u, baseCommentsSaved)

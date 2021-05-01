@@ -24,7 +24,7 @@ def progress_bar(
     _max,
     fullChar="■",
     emptyChar=" ",
-    endvals=None,
+    start="",
     alwaysReturn=False,
     alwaysContinue=False,
 ):
@@ -44,13 +44,7 @@ def progress_bar(
     pb = f"{Fore.LIGHTCYAN_EX}[{Fore.LIGHTGREEN_EX}{fullChar * filled}{emptyChar * empty}{Fore.LIGHTCYAN_EX}]{Style.RESET_ALL}"
     perc = f"{Fore.LIGHTGREEN_EX}{round(multiplier*100)}% {Style.RESET_ALL}complete"
 
-    if endvals is None:
-        ending = ""
-    else:
-        ending = str(endvals)
-        # ending = f" ({endvals[0]}/{endvals[1]})"
-
-    final = f"{pb}  {perc} ({Fore.CYAN}{val}{Style.RESET_ALL}/{Fore.CYAN}{_max}{Style.RESET_ALL}) {ending}"
+    final = f"{Fore.CYAN}{start}{Style.RESET_ALL} {pb} {perc}"
     endfill = " " * (maxlen - len(final))
 
     print(
