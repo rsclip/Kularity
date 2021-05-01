@@ -112,3 +112,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# My ignores
+.env*
+profile.txt
+/test
+*.bat
+users.txt
+test.py
+subreddits.txt
