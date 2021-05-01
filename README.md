@@ -46,7 +46,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
+[![Kularity screenshot][product-screenshot]](https://github.com/Cyclip/Kularity/)
 
 Kularity provides a simplistic, customisable and straightforward way to scrape reddit to retrieve comments and their scores. Data may be used for machine learning datasets, statistics or other tasks. It uses an algorithm which scrapes for comments specifically ignoring inactive users while continually looking for more related users to use. Each scrape is split into layers.
 
@@ -118,8 +118,6 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 ## License
 
 Distributed under GNU General Public License v3.0. See `LICENSE` for more information.
-
-[product-screenshot]: images/screenshot.png
 
 <!-- INFORMATION -->
 # Information
@@ -231,3 +229,5 @@ Play a notification sound when scraping is complete.
 --
 
 Sound effects obtained from https://www.zapsplat.com
+
+[product-screenshot]: images/screenshot.png
