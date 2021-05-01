@@ -230,4 +230,4 @@ Play a notification sound when scraping is complete.
 
 Sound effects obtained from https://www.zapsplat.com
 
-[product-screenshot]: images/screenshot.png
+[product-screenshot]: images/example.png
