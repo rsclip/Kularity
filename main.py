@@ -377,7 +377,18 @@ if __name__ == "__main__":
         help="Notify sound when completed",
     )
 
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Use a GUI rather than a CLI",
+    )
+
     args = vars(parser.parse_args())
+    print(args)
+    if args["gui"]:
+        import main_gui
+
+        sys.exit()
 
     # Parse normalize for ease of use
     normalize = build_normalize(args["normalize"])

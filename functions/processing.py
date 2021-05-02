@@ -70,6 +70,15 @@ def set_blocked(
         logger.info(f"Restricting to {len(restrictSubs)} subreddits")
 
 
+def checkSubreddit(name):
+    try:
+        r.subreddits.search_by_name(name, exact=True)
+        return True
+    except Exception:
+        print("ow")
+        return False
+
+
 def checkSafe(subj):
     """
     False: NSFW
