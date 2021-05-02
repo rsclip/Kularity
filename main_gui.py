@@ -132,7 +132,15 @@ class MainWindow(QMainWindow):
         pass
 
     def load_args(self):
-        pass
+        fileName = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Open list"),
+            os.environ['USERPROFILE']
+        )[0]
+
+        if fileName:
+            args = json.load(open(fileName, 'r'))
+            self.set_args(args)
 
     def save_args(self):
         fileName = QFileDialog.getSaveFileName(self, 'Save arguments to file', os.environ['USERPROFILE'], selectedFilter='*.json')[0]
