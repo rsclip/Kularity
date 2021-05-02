@@ -5,8 +5,15 @@ from gui import Ui_MainWindow
 import os
 import tkinter
 import json
+import clipboard
+import traceback
+import logging
+from pathlib import Path
+import time
 
 from functions.processing import checkSubreddit
+from functions.general import _human_bytes, get_file_handle, handle_time, get_subs
+from functions.formatters import CustomFormatter, CustomCleanFormatter
 
 
 class MainWindow(QMainWindow):
@@ -129,7 +136,220 @@ class MainWindow(QMainWindow):
                 )
 
     def start_scraping(self):
-        pass
+        def process_layer(layer):
+            logger.info(
+                f"Processing layer {layer}... ({get_dump_size()})"
+            )
+            start = time.time()
+
+            # Prepare next layer
+            layerHandler.setup_build_layer(layer + 1)
+
+            # Fetch all usernames to scrape
+            usernames = layerHandler.read_build_layer(layer)[: args["userLimit"]]
+            lenUsers = len(usernames) - 1
+
+            # Iterate through all users
+            for i, user in enumerate(usernames):
+                if args["verbose"]:
+                    logger.debug(f"Getting {user} comments..")
+
+                # Scrape all comments, get submission data from x
+                # amount of comments
+                newUsers, comments = get_user_comments(
+                    user,
+                    normalize,
+                    limit=args["userCommentLimit"],
+                    limitUsers=args["userLimit"],
+                    submissionLimit=args["submissionLimit"],
+                    userID=i,
+                    lenUsers=lenUsers,
+                )
+
+                if args["verbose"]:
+                    logger.debug(f"Received {len(newUsers)} users for next layer")
+                    logger.debug(f"Received {len(comments)} comments")
+                    logger.info(f"Completed {user}")
+
+                # Add users to the next layer and add to final database
+                layerHandler.dump_build_layer(layer + 1, newUsers)
+                layerHandler.dump_data(comments)
+
+            end = time.time()
+            logger.info(
+                f"Finished processing layer {layer} (Elapsed {round(end-start, 2)}s)"
+            )
+
+        def creation_process():
+            logger.info("Creating layer 1..")
+            layerHandler.setup_build_layer(1)
+
+            # Get initial posts and the author of those posts
+            startSubmissions, initialUserCollection = handle_errors(
+                users_from_posts,
+                args["startingSubreddit"],
+                sorting=args["startingSort"],
+                limit=args["startingPostLimit"],
+            )
+
+            logger.info(f"Received {len(startSubmissions)} submissions")
+            logger.info(f"Received {len(initialUserCollection)} users")
+
+            # Get comments from each post
+            commentUsers, comments = handle_errors(
+                get_post_comments,
+                startSubmissions,
+                limit=args["postCommentLimit"],
+            )
+            logger.info(f"Got {len(commentUsers)} users")
+            logger.info(f"Got {len(comments)} initial comments")
+
+            initialUserCollection += commentUsers
+            del commentUsers
+            del startSubmissions
+
+            tmp = len(initialUserCollection)
+            if tmp == 0:
+                logger.critical("No initial users were collected (excessive blocking?)")
+                sys.exit(1)
+
+            # Dump scraped comments to database
+            layerHandler.dump_data(comments)
+
+            # Dump to layer 1
+            layerHandler.dump_build_layer(1, initialUserCollection)
+            logger.info("Finished building layer 1")
+
+        def get_dump_size():
+            return _human_bytes(os.path.getsize(os.path.join(args["dir"], "dump.db")))
+
+        def build_normalize(normalize):
+            if normalize is None:
+                return {
+                    "normalize": False,
+                }
+            else:
+                return {
+                    "normalize": True,
+                    "min": normalize[0],
+                    "max": normalize[1],
+                }
+
+        def setup_directory(dir):
+            Path(os.path.join(dir, "build")).mkdir(exist_ok=True, parents=True)
+            logger.debug("Setup directory")
+
+        def handle_errors(func, *args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.error(
+                    f"Error calling {func.__name__} with args {', '.join(list(args))}, kwargs {dict(kwargs)}: {traceback.format_exc()}"
+                )
+                sys.exit(1)
+
+        args = self.get_args()
+
+        # Parse normalize for ease of use
+        normalize = build_normalize(args["normalize"])
+
+        # --------------
+        # OTHER STUFF
+        # --------------
+
+        # Setup logging
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+        consoleHandler.setFormatter(CustomFormatter(args["fileLogging"]))
+
+        logger.addHandler(consoleHandler)
+
+        # Setup directory and make sure arguments are valid
+        setup_directory(args["dir"])
+
+        if args["fileLogging"]:
+            fileHandler = logging.FileHandler(os.path.join(args["dir"], "build/log.log"))
+            fileHandler.setLevel(logging.DEBUG)
+            fileHandler.setFormatter(CustomCleanFormatter(args["fileLogging"]))
+
+            logger.addHandler(fileHandler)
+
+        if args["verbose"]:
+            logger.setLevel(logging.DEBUG)
+            consoleHandler.setLevel(logging.DEBUG)
+
+        # Import necesssary functions
+        # This is delayed to allow parsing arguments to be faster
+        from functions.processing import (
+            users_from_posts,
+            get_post_comments,
+            get_user_comments,
+            set_lp_logger,
+            set_blocked,
+        )
+        from functions.layerHandling import LayerHandling
+
+        if args["notify"]:
+            import winsound
+
+        layerHandler = LayerHandling(logger, args["dir"])
+
+        # Setup build database
+        layerHandler.clear_build_db()
+        layerHandler.establish_build_db()
+
+        # Setup dump database
+        layerHandler.clear_dump_db()
+        layerHandler.establish_dump_db()
+        layerHandler.setup_dump_table(normalize)
+
+        set_lp_logger(logger, args["verbose"])
+        set_blocked(
+            args["blockUsers"],
+            args["blockNSFW"],
+            args["blockSubreddits"],
+            args["minScore"],
+            args["maxScore"],
+            args["restrictSubs"],
+        )
+
+        # Create first layer
+        try:
+            creation_process()
+        except Exception:
+            self.error(
+                f"An unexpected exception occurred during creation - {traceback.format_exc()}"
+            )
+
+        # Process each layer
+        try:
+            self.ui.layerpb.setMaximum(args["layers"] + 1)
+            for i in range(1, args["layers"] + 1):
+                process_layer(i)
+                self.ui.layerpb.setValue(i)
+        except Exception:
+            self.error(
+                f"An unexpected exception occurred during processing layer {i} - {traceback.format_exc()}"
+            )
+
+        if args["formatJSON"]:
+            try:
+                layerHandler.json_dump()
+            except Exception:
+                self.error(f"Failed to dump JSON: {traceback.format_exc()}")
+
+        if args["notify"]:
+            winsound.PlaySound("notif.wav", winsound.SND_ALIAS)
+
+        QMessageBox.information(
+            self, self.tr("Kularity"),
+            self.tr(f"""Stored {args['layers']} layers: {get_dump_size()}"""),
+            QMessageBox.Ok,
+        )
+
 
     def load_args(self):
         fileName = QFileDialog.getOpenFileName(
@@ -139,12 +359,18 @@ class MainWindow(QMainWindow):
         )[0]
 
         if fileName:
-            args = json.load(open(fileName, 'r'))
+            try:
+                args = json.load(open(fileName, 'r'))
+            except Exception:
+                return QMessageBox.critical(
+                    self, self.tr("Kularity"),
+                    self.tr(f"{fileName} has an invalid format."),
+                    QMessageBox.Ok,
+                )
             self.set_args(args)
 
     def save_args(self):
         fileName = QFileDialog.getSaveFileName(self, 'Save arguments to file', os.environ['USERPROFILE'], selectedFilter='*.json')[0]
-        print(fileName)
 
         if fileName:
             if os.path.isfile(fileName):
@@ -165,10 +391,31 @@ class MainWindow(QMainWindow):
             )
 
     def convert_args_bat(self):
-        pass
+        fileName = QFileDialog.getSaveFileName(self, 'Save arguments to bat', os.environ['USERPROFILE'], selectedFilter='*.bat')[0]
+
+        if fileName:
+            args = self.get_args()
+            converted = self.convert_args(args, 'bat')
+            with open(fileName, 'w') as f:
+                f.write(converted)
+                print(converted)
+
+            QMessageBox.information(
+                self, self.tr("Kularity"),
+                self.tr(f"Argument batchfile saved to {fileName}"),
+                QMessageBox.Ok,
+            )
 
     def convert_args_cmd(self):
-        pass
+        args = self.get_args()
+        converted = self.convert_args(args, 'cmd')
+        clipboard.copy(converted)
+
+        QMessageBox.information(
+            self, self.tr("Ksularity"),
+            self.tr(f"Command copied to clipboard\nCommand: {converted}"),
+            QMessageBox.Ok,
+        )
 
     def load_default_args(self):
         if QMessageBox.warning(
@@ -181,6 +428,7 @@ class MainWindow(QMainWindow):
     """
     Other functions
     """
+
     def get_args(self):
         ref = self.ui
 
@@ -205,7 +453,7 @@ class MainWindow(QMainWindow):
             "layers": ref.layers.value(),
             "dir": ref.dir.text(),
             "normalize": normalize,
-            "noInput": False,
+            "noInput": True,
             "formatJSON": ref.formatJSON.isChecked(),
             "blockUsers": blockUsers,
             "blockSubreddits": blockSubreddits,
@@ -232,7 +480,6 @@ class MainWindow(QMainWindow):
             "layers": 3,
             "dir": os.path.abspath(os.path.join(os.getcwd(), 'dump')),
             "normalize": False,
-            "noInput": False,
             "formatJSON": False,
             "blockUsers": {
                 "active": False,
@@ -248,10 +495,13 @@ class MainWindow(QMainWindow):
             "minTime":     None,
             "restrictSubs": [],
             "notify": True,
-            "gui": False
+            "gui": False,
+            "noInput": True,
         }
 
     def set_args(self, args):
+        normalize = not (isinstance(args['normalize'], bool))
+
         self.ui.startingPostLimit.setValue(args['startingPostLimit'])
         self.ui.startingSubreddit.setText(args['startingSubreddit'])
         self.ui.postCommentLimit.setValue(args['postCommentLimit'])
@@ -262,7 +512,12 @@ class MainWindow(QMainWindow):
         self.ui.fileLogging.setChecked(args['fileLogging'])
         self.ui.layers.setValue(args['layers'])
         self.ui.dir.setText(args['dir'])
-        self.ui.normalize.setChecked(args['normalize'])
+        self.ui.normalize.setChecked(normalize)
+
+        if normalize:
+            self.ui.normalizeMin.setValue(args['normalize'][0])
+            self.ui.normalizeMax.setValue(args['normalize'][1])
+
         self.handle_normalize()
         self.ui.formatJSON.setChecked(args['formatJSON'])
 
@@ -317,7 +572,7 @@ class MainWindow(QMainWindow):
         return self.filterMapping[self.ui.tabWidget_2.currentIndex()]
 
     def get_listwidget_items(self, widget):
-        return [widget.item(i) for i in range(widget.count() - 1)]
+        return [widget.item(i).text() for i in range(widget.count())]
 
     def handle_list(self, index):
         fv = self.filterMapping[index]['widget']
@@ -326,6 +581,69 @@ class MainWindow(QMainWindow):
             "active": len(items) > 0,
             "content": items,
         }
+
+    def error(self, txt):
+        QMessageBox.critical(
+            self, self.tr("Kularity"),
+            self.tr(txt),
+            QMessageBox.Ok,
+        )
+
+    def convert_args(self, args, to):
+        def build_line(args):
+            formattedArgs = []
+            print(args)
+
+            for k, v in args.items():
+                print(k, v)
+                if v in (False, None):
+                    continue
+                elif v is True:
+                    v = ''
+
+                if isinstance(v, (tuple, list)):
+                    if len(v) == 0:
+                        continue
+                    v = ' '.join([str(i) for i in v])
+                elif isinstance(v, dict):
+                    if not v['active'] or len(v['content']) == 0:
+                        continue
+                    fn = os.path.join(os.environ['TEMP'], f'tmp-{k}.txt')
+                    with open(fn, 'w') as f:
+                        f.write('\n'.join(v['content']))
+                    v = fn
+
+                if k == "dir":
+                    v = f'"{v}"'
+
+                finalv = f" {v}" if v != '' else ""
+
+                formattedArgs.append(f'--{k}{finalv}')
+
+            mainFile = os.path.join(
+                os.getcwd(), 'main.py'
+            )
+
+            return f'python {mainFile} {" ".join(formattedArgs)}'
+
+        if to == 'cmd':
+            return build_line(args)
+        elif to == 'bat':
+            return f"""@echo off
+title Kularity scraping
+rem Bypass "Terminate Batch Job" prompt.
+if "%~1"=="-FIXED_CTRL_C" (
+   REM Remove the -FIXED_CTRL_C parameter
+   SHIFT
+) ELSE (
+   REM Run the batch with <NUL and -FIXED_CTRL_C
+   CALL <NUL %0 -FIXED_CTRL_C %*
+   GOTO :EOF
+)
+cls
+{build_line(args)}
+pause
+"""
 
 
 app = QApplication(sys.argv)
