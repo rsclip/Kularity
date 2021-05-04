@@ -140,6 +140,7 @@ def process_layer(layer):
         newUsers, comments = get_user_comments(
             user,
             normalize,
+            sorting="hot",
             limit=args["userCommentLimit"],
             limitUsers=args["userLimit"],
             submissionLimit=args["submissionLimit"],
@@ -337,7 +338,6 @@ if __name__ == "__main__":
     )
 
     args = vars(parser.parse_args())
-    print(args)
     if args["gui"]:
         import main_gui
 

@@ -50,12 +50,25 @@ class LayerHandling:
             [(randint(1, 9999999999), i["comment"], i["score"]) for i in comments]
         )
 
-        self.dumpCurs.executemany(
-            "INSERT INTO data (id, comment, score) VALUES (?, ?, ?)",
-            data,
-        )
-        self.dumpConn.commit()
+        chunkID = 0
+        for chunk in self.__get_chunks(data, 5):
+            chunkID += 1
+            self.logger.debug(f"Inserting chunk {chunkID}: {len(chunk)}")
+            self.logger.debug(json.dumps(chunk, indent=2))
+            self.dumpCurs.executemany(
+                "INSERT OR IGNORE INTO data (id, comment, score) VALUES (?, ?, ?)",
+                chunk,
+            )
+            self.logger.debug(
+                f"Inserted chunk {chunkID}: {len(chunk) * chunkID}/{len(data)}"
+            )
+            self.dumpConn.commit()
+            self.logger.debug(f"Committed to database")
         self.logger.debug(f"Inserted {len(comments)} rows into dump.db")
+
+    def __get_chunks(self, data, n):
+        for i in range(0, len(data), n):
+            yield data[i : i + n]
 
     def __get_dump(self):
         self.dumpCurs.execute("SELECT * FROM data")

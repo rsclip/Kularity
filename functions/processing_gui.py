@@ -2,7 +2,6 @@ import praw
 import dotenv
 import os
 import itertools
-from colorama import Fore, Style
 import traceback
 
 from functions.general import progress_bar, normalize_range
@@ -17,8 +16,7 @@ from_iterable = itertools.chain.from_iterable
 
 r = praw.Reddit(client_id=id, client_secret=secret, user_agent=ua)
 r.config.log_requests = 0
-skw = Fore.CYAN
-ekw = Style.RESET_ALL
+skw, ekw = "", ""  # im lazy
 
 
 def clean_users(userList):
@@ -30,6 +28,11 @@ def set_lp_logger(_logger, _verbose):
     global verbose
     logger = _logger
     verbose = _verbose
+
+
+def set_progress(pb):
+    global PROGRESS_BAR
+    PROGRESS_BAR = pb
 
 
 def set_blocked(
@@ -47,12 +50,10 @@ def set_blocked(
     global restrictedSubs
 
     blockedUsers = users["content"]
-    logger.info(f"Loaded {Fore.CYAN}{len(blockedUsers)}{Style.RESET_ALL} blocked users")
+    logger.info(f"Loaded {len(blockedUsers)} blocked users")
 
     blockedSubreddits = subreddits["content"]
-    logger.info(
-        f"Loaded {Fore.CYAN}{len(blockedSubreddits)}{Style.RESET_ALL} blocked subreddits"
-    )
+    logger.info(f"Loaded {len(blockedSubreddits)} blocked subreddits")
 
     blockNSFW = nsfw
     logger.info("Blocking nsfw" if blockNSFW else "Not blocking nsfw")
@@ -204,14 +205,15 @@ def get_post_comments(submission, limit=5000):
             )
         return tuple(dict.fromkeys(data)), comments
 
-    def handleIteration(s, i, _max):
+    def handleIteration(s, i):
         data = getData(s)
-        progress_bar(i + 1, _max, start="Getting comments: ")
+        PROGRESS_BAR.setValue(i + 1)
         return data
 
     if isinstance(submission, (list, tuple)):
         _max = len(submission)
-        rv = [handleIteration(s, i, _max) for i, s in enumerate(submission)]
+        PROGRESS_BAR.setMaximum(_max)
+        rv = [handleIteration(s, i) for i, s in enumerate(submission)]
         a, b = tuple(from_iterable([i[0] for i in rv])), tuple(
             from_iterable([i[1] for i in rv])
         )
@@ -308,13 +310,7 @@ def get_user_comments(
                         }
                     )
 
-                if not verbose:
-                    progress_bar(
-                        baseCommentsSaved[0] + len(commentData),
-                        maxCommentsSaved,
-                        alwaysReturn=True,
-                        start=f"Getting u/{user.name} comments: ",
-                    )
+                PROGRESS_BAR.setValue(baseCommentsSaved[0] + len(commentData))
             except AttributeError:
                 # NoneType (user is deleted or banned)
                 logger.warning(f"{skw}{i}{ekw} is deleted/banned/otherwise")
@@ -336,10 +332,8 @@ def get_user_comments(
         commentData, submissionData = [], []
         listIter = user[:limitUsers]
         maxCommentsSaved = len(listIter) * limit  # Target comments (max)
+        PROGRESS_BAR.setMaximum(maxCommentsSaved)
         baseCommentsSaved = 0
-        progress_bar(
-            baseCommentsSaved, maxCommentsSaved, start="Getting user comments: "
-        )
 
         for i, u in enumerate(listIter):
             tmpSubmission, tmpComment = getData(u, baseCommentsSaved)

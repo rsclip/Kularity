@@ -1,6 +1,12 @@
 import sys
 from PySide6 import QtCore
-from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QFileDialog,
+    QMessageBox,
+    QWidget,
+)
 from gui import Ui_MainWindow
 import os
 import tkinter
@@ -10,6 +16,7 @@ import traceback
 import logging
 from pathlib import Path
 import time
+from threading import Thread
 
 from functions.processing import checkSubreddit
 from functions.general import _human_bytes, get_file_handle, handle_time, get_subs
@@ -38,24 +45,32 @@ class MainWindow(QMainWindow):
                 "widget": self.ui.restrictedSubredditList,
             },
         }
+        self.ui.status.setStyleSheet("color: rgb(226, 15, 15);")
 
     """
     Signal/slot functions
     """
 
     def set_directory(self):
-        dir = QFileDialog.getExistingDirectory(None, 'Select a folder to dump data in:', 'C:\\', QFileDialog.ShowDirsOnly)
+        dir = QFileDialog.getExistingDirectory(
+            None, "Select a folder to dump data in:", "C:\\", QFileDialog.ShowDirsOnly
+        )
         if self.files_exist(dir):
             ret = QMessageBox.warning(
-                self, self.tr("Kularity"),
-                self.tr(f"There are existing files in {dir}.\n" + \
-                        "Are you sure you want to use this directory?"),
-                QMessageBox.Yes | QMessageBox.No)
+                self,
+                self.tr("Kularity"),
+                self.tr(
+                    f"There are existing files in {dir}.\n"
+                    + "Are you sure you want to use this directory?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+            )
 
-            if ret == QMessageBox.Yes:
-                self.ui.dir.setText(os.path.abspath(dir))
-            else:
-                self.ui.dir.setText(os.path.abspath(os.path.join(dir, 'dump')))
+            if ret == QMessageBox.No:
+                self.ui.dir.setText(os.path.abspath(os.path.join(dir, "dump")))
+                return
+
+        self.ui.dir.setText(os.path.abspath(dir))
 
     def toggle_normalize(self):
         self.handle_normalize()
@@ -71,7 +86,9 @@ class MainWindow(QMainWindow):
             self.ui.normalizeMin.setValue(max)
 
     def view_formulae(self):
-        self.ui.tabWidget.setCurrentWidget(self.ui.tabWidget.findChild(QWidget, "formulae"))
+        self.ui.tabWidget.setCurrentWidget(
+            self.ui.tabWidget.findChild(QWidget, "formulae")
+        )
 
     def check_subreddit(self):
         # Thread(target=self.check_subreddit_thread()).start()
@@ -80,10 +97,10 @@ class MainWindow(QMainWindow):
     def add_filtering(self):
         vars = self.get_filtering_vars()
 
-        user = vars['input'].text()
+        user = vars["input"].text()
         if len(user) > 3:
-            vars['widget'].addItem(user)
-            vars['input'].setText("")
+            vars["widget"].addItem(user)
+            vars["input"].setText("")
 
     def load_filtering(self):
         vars = self.get_filtering_vars()
@@ -91,55 +108,81 @@ class MainWindow(QMainWindow):
         fileName = QFileDialog.getOpenFileName(
             self,
             self.tr("Open list"),
-            os.environ['USERPROFILE']
+            os.path.join(os.environ["USERPROFILE"], "desktop"),
         )[:-1]
 
         users = []
         for f in fileName:
             try:
-                with open(f, 'r') as f:
-                    users.extend(f.read().replace('\r', '').split('\n'))
+                with open(f, "r") as f:
+                    users.extend(f.read().replace("\r", "").split("\n"))
             except UnicodeDecodeError:
                 QMessageBox.error(
-                    self, self.tr("Kularity"),
+                    self,
+                    self.tr("Kularity"),
                     self.tr(f"{f} is not a valid file"),
-                    QMessageBox.Ok)
+                    QMessageBox.Ok,
+                )
                 return
 
-        vars['widget'].addItems(users)
+        vars["widget"].addItems(users)
         QMessageBox.information(
-            self, self.tr("Kularity"),
+            self,
+            self.tr("Kularity"),
             self.tr(f"Added {len(users)} users"),
-            QMessageBox.Ok)
+            QMessageBox.Ok,
+        )
 
     def remove_filtering(self):
         vars = self.get_filtering_vars()
 
-        vars['widget'].takeItem(vars['widget'].currentRow())
+        vars["widget"].takeItem(vars["widget"].currentRow())
 
     def clear_filtering(self):
         vars = self.get_filtering_vars()
 
-        length = len(self.get_listwidget_items(vars['widget']))
+        length = len(self.get_listwidget_items(vars["widget"]))
         if length > 0:
             ret = QMessageBox.warning(
-                self, self.tr("Kularity"),
-                self.tr(f"Are you sure you want to clear the list?\nThere are {length} items."),
-                QMessageBox.Yes | QMessageBox.No)
+                self,
+                self.tr("Kularity"),
+                self.tr(
+                    f"Are you sure you want to clear the list?\nThere are {length} items."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+            )
 
             if ret == QMessageBox.Yes:
-                vars['widget'].clear()
+                vars["widget"].clear()
                 QMessageBox.information(
-                    self, self.tr("Kularity"),
+                    self,
+                    self.tr("Kularity"),
                     self.tr(f"Cleared {length} items"),
                     QMessageBox.Ok,
                 )
 
+    def reset_pb(self):
+        self.ui.singlepb.setValue(0)
+        self.ui.layerpb.setValue(0)
+
     def start_scraping(self):
+
+        self.reset_pb()
+        self.ui.pushButton_3.setEnabled(False)
+        self.ui.pushButton_3.setText("Scraping..")
+        self.status("Starting..")
+        self.ui.status.setStyleSheet("color: rgb(15, 226, 17);")
+        self.ui.tabWidget.setEnabled(False)
+
+        try:
+            QApplication.instance().processEvents()
+            Thread(target=self.scrape).start()
+        except Exception:
+            print(traceback.format_exc())
+
+    def scrape(self):
         def process_layer(layer):
-            logger.info(
-                f"Processing layer {layer}... ({get_dump_size()})"
-            )
+            self.status(f"Processing layer {layer}... ({get_dump_size()})")
             start = time.time()
 
             # Prepare next layer
@@ -159,6 +202,7 @@ class MainWindow(QMainWindow):
                 newUsers, comments = get_user_comments(
                     user,
                     normalize,
+                    sorting="hot",
                     limit=args["userCommentLimit"],
                     limitUsers=args["userLimit"],
                     submissionLimit=args["submissionLimit"],
@@ -211,7 +255,7 @@ class MainWindow(QMainWindow):
             tmp = len(initialUserCollection)
             if tmp == 0:
                 logger.critical("No initial users were collected (excessive blocking?)")
-                sys.exit(1)
+                return
 
             # Dump scraped comments to database
             layerHandler.dump_data(comments)
@@ -224,7 +268,7 @@ class MainWindow(QMainWindow):
             return _human_bytes(os.path.getsize(os.path.join(args["dir"], "dump.db")))
 
         def build_normalize(normalize):
-            if normalize is None:
+            if normalize in (None, False):
                 return {
                     "normalize": False,
                 }
@@ -246,9 +290,11 @@ class MainWindow(QMainWindow):
                 logger.error(
                     f"Error calling {func.__name__} with args {', '.join(list(args))}, kwargs {dict(kwargs)}: {traceback.format_exc()}"
                 )
-                sys.exit(1)
+                return
 
         args = self.get_args()
+        start = time.time()
+        self.status("Setting up..")
 
         # Parse normalize for ease of use
         normalize = build_normalize(args["normalize"])
@@ -271,7 +317,9 @@ class MainWindow(QMainWindow):
         setup_directory(args["dir"])
 
         if args["fileLogging"]:
-            fileHandler = logging.FileHandler(os.path.join(args["dir"], "build/log.log"))
+            fileHandler = logging.FileHandler(
+                os.path.join(args["dir"], "build/log.log")
+            )
             fileHandler.setLevel(logging.DEBUG)
             fileHandler.setFormatter(CustomCleanFormatter(args["fileLogging"]))
 
@@ -283,12 +331,13 @@ class MainWindow(QMainWindow):
 
         # Import necesssary functions
         # This is delayed to allow parsing arguments to be faster
-        from functions.processing import (
+        from functions.processing_gui import (
             users_from_posts,
             get_post_comments,
             get_user_comments,
             set_lp_logger,
             set_blocked,
+            set_progress,
         )
         from functions.layerHandling import LayerHandling
 
@@ -315,114 +364,155 @@ class MainWindow(QMainWindow):
             args["maxScore"],
             args["restrictSubs"],
         )
+        set_progress(self.ui.singlepb)
+
+        self.status("Creating layer 1..")
 
         # Create first layer
         try:
+            QApplication.instance().processEvents()
             creation_process()
         except Exception:
             self.error(
                 f"An unexpected exception occurred during creation - {traceback.format_exc()}"
             )
 
+        self.status("Begin processing layers..")
+
         # Process each layer
         try:
             self.ui.layerpb.setMaximum(args["layers"] + 1)
             for i in range(1, args["layers"] + 1):
+                QApplication.instance().processEvents()
                 process_layer(i)
-                self.ui.layerpb.setValue(i)
+                self.ui.layerpb.setValue(i + 1)
         except Exception:
             self.error(
                 f"An unexpected exception occurred during processing layer {i} - {traceback.format_exc()}"
             )
 
         if args["formatJSON"]:
+            self.status("Formatting json..")
             try:
                 layerHandler.json_dump()
             except Exception:
                 self.error(f"Failed to dump JSON: {traceback.format_exc()}")
 
         if args["notify"]:
-            winsound.PlaySound("notif.wav", winsound.SND_ALIAS)
+            winsound.PlaySound("notif.wav", winsound.SND_ALIAS | winsound.SND_ASYNC)
+
+        self.status(f"Completed! (Elapsed {round(time.time() - start, 2)}s)")
 
         QMessageBox.information(
-            self, self.tr("Kularity"),
+            self,
+            self.tr("Kularity"),
             self.tr(f"""Stored {args['layers']} layers: {get_dump_size()}"""),
             QMessageBox.Ok,
         )
 
+        self.reset_pb()
+        self.ui.pushButton_3.setEnabled(True)
+        self.ui.pushButton_3.setText("Start scraping")
+        self.status("Inactive")
+        self.ui.status.setStyleSheet("color: rgb(226, 15, 15);")
+        self.ui.tabWidget.setEnabled(True)
 
     def load_args(self):
         fileName = QFileDialog.getOpenFileName(
             self,
             self.tr("Open list"),
-            os.environ['USERPROFILE']
+            os.path.join(os.environ["USERPROFILE"], "desktop"),
         )[0]
 
         if fileName:
             try:
-                args = json.load(open(fileName, 'r'))
+                args = json.load(open(fileName, "r"))
             except Exception:
                 return QMessageBox.critical(
-                    self, self.tr("Kularity"),
+                    self,
+                    self.tr("Kularity"),
                     self.tr(f"{fileName} has an invalid format."),
                     QMessageBox.Ok,
                 )
             self.set_args(args)
 
     def save_args(self):
-        fileName = QFileDialog.getSaveFileName(self, 'Save arguments to file', os.environ['USERPROFILE'], selectedFilter='*.json')[0]
+        fileName = QFileDialog.getSaveFileName(
+            self,
+            "Save arguments to file",
+            os.path.join(os.environ["USERPROFILE"], "desktop"),
+            selectedFilter="*.json",
+        )[0]
 
         if fileName:
             if os.path.isfile(fileName):
-                if QMessageBox.warning(
-                    self, self.tr("Kularity"),
-                    self.tr(f"{fileName} already exists. Are you sure you want to overwrite this file?"),
-                    QMessageBox.Yes | QMessageBox.No
-                ) == QMessageBox.No:
+                if (
+                    QMessageBox.warning(
+                        self,
+                        self.tr("Kularity"),
+                        self.tr(
+                            f"{fileName} already exists. Are you sure you want to overwrite this file?"
+                        ),
+                        QMessageBox.Yes | QMessageBox.No,
+                    )
+                    == QMessageBox.No
+                ):
                     return
 
             args = self.get_args()
-            json.dump(args, open(fileName, 'w'))
+            json.dump(args, open(fileName, "w"))
 
             QMessageBox.information(
-                self, self.tr("Kularity"),
+                self,
+                self.tr("Kularity"),
                 self.tr(f"Arguments saved to {fileName}"),
                 QMessageBox.Ok,
             )
 
     def convert_args_bat(self):
-        fileName = QFileDialog.getSaveFileName(self, 'Save arguments to bat', os.environ['USERPROFILE'], selectedFilter='*.bat')[0]
+        fileName = QFileDialog.getSaveFileName(
+            self,
+            "Save arguments to bat",
+            os.path.join(os.environ["USERPROFILE"], "desktop"),
+            selectedFilter="*.bat",
+        )[0]
 
         if fileName:
             args = self.get_args()
-            converted = self.convert_args(args, 'bat')
-            with open(fileName, 'w') as f:
+            converted = self.convert_args(args, "bat")
+            with open(fileName, "w") as f:
                 f.write(converted)
                 print(converted)
 
             QMessageBox.information(
-                self, self.tr("Kularity"),
+                self,
+                self.tr("Kularity"),
                 self.tr(f"Argument batchfile saved to {fileName}"),
                 QMessageBox.Ok,
             )
 
     def convert_args_cmd(self):
         args = self.get_args()
-        converted = self.convert_args(args, 'cmd')
+        converted = self.convert_args(args, "cmd")
         clipboard.copy(converted)
 
         QMessageBox.information(
-            self, self.tr("Ksularity"),
+            self,
+            self.tr("Ksularity"),
             self.tr(f"Command copied to clipboard\nCommand: {converted}"),
             QMessageBox.Ok,
         )
 
     def load_default_args(self):
-        if QMessageBox.warning(
-            self, self.tr("Kularity"),
-            self.tr("Are you sure you want to reset to default arguments?"),
-            QMessageBox.Yes | QMessageBox.No
-        ) == QMessageBox.Yes:
+        if (
+            QMessageBox.warning(
+                self,
+                self.tr("Kularity"),
+                self.tr("Are you sure you want to reset to default arguments?"),
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        ):
             self.set_args(self.get_default_args())
 
     """
@@ -461,7 +551,7 @@ class MainWindow(QMainWindow):
             "minScore": -10000000,
             "maxScore": 10000000,
             "minTime": None,
-            "restrictSubs": self.get_listwidget_items(self.filterMapping[2]['widget']),
+            "restrictSubs": self.get_listwidget_items(self.filterMapping[2]["widget"]),
             "notify": ref.notify.isChecked(),
             "gui": False,
         }
@@ -478,21 +568,15 @@ class MainWindow(QMainWindow):
             "verbose": False,
             "fileLogging": False,
             "layers": 3,
-            "dir": os.path.abspath(os.path.join(os.getcwd(), 'dump')),
+            "dir": os.path.abspath(os.path.join(os.getcwd(), "dump")),
             "normalize": False,
             "formatJSON": False,
-            "blockUsers": {
-                "active": False,
-                "content": []
-            },
-            "blockSubreddits": {
-                "active": False,
-                "content": []
-            },
+            "blockUsers": {"active": False, "content": []},
+            "blockSubreddits": {"active": False, "content": []},
             "blockNSFW": False,
             "minScore": -10000000,
             "maxScore": 10000000,
-            "minTime":     None,
+            "minTime": None,
             "restrictSubs": [],
             "notify": True,
             "gui": False,
@@ -500,41 +584,43 @@ class MainWindow(QMainWindow):
         }
 
     def set_args(self, args):
-        normalize = not (isinstance(args['normalize'], bool))
+        normalize = not (isinstance(args["normalize"], bool))
 
-        self.ui.startingPostLimit.setValue(args['startingPostLimit'])
-        self.ui.startingSubreddit.setText(args['startingSubreddit'])
-        self.ui.postCommentLimit.setValue(args['postCommentLimit'])
-        self.ui.userCommentLimit.setValue(args['userCommentLimit'])
-        self.ui.userLimit.setValue(args['userLimit'])
-        self.ui.submissionLimit.setValue(args['submissionLimit'])
-        self.ui.verbose.setChecked(args['verbose'])
-        self.ui.fileLogging.setChecked(args['fileLogging'])
-        self.ui.layers.setValue(args['layers'])
-        self.ui.dir.setText(args['dir'])
+        self.ui.startingPostLimit.setValue(args["startingPostLimit"])
+        self.ui.startingSubreddit.setText(args["startingSubreddit"])
+        self.ui.postCommentLimit.setValue(args["postCommentLimit"])
+        self.ui.userCommentLimit.setValue(args["userCommentLimit"])
+        self.ui.userLimit.setValue(args["userLimit"])
+        self.ui.submissionLimit.setValue(args["submissionLimit"])
+        self.ui.verbose.setChecked(args["verbose"])
+        self.ui.fileLogging.setChecked(args["fileLogging"])
+        self.ui.layers.setValue(args["layers"])
+        self.ui.dir.setText(args["dir"])
         self.ui.normalize.setChecked(normalize)
 
         if normalize:
-            self.ui.normalizeMin.setValue(args['normalize'][0])
-            self.ui.normalizeMax.setValue(args['normalize'][1])
+            self.ui.normalizeMin.setValue(args["normalize"][0])
+            self.ui.normalizeMax.setValue(args["normalize"][1])
 
         self.handle_normalize()
-        self.ui.formatJSON.setChecked(args['formatJSON'])
+        self.ui.formatJSON.setChecked(args["formatJSON"])
 
         self.ui.blockedUsersList_2.clear()
-        self.ui.blockedUsersList_2.addItems(args['blockUsers']['content'])
+        self.ui.blockedUsersList_2.addItems(args["blockUsers"]["content"])
 
         self.ui.blockedSubredditsList.clear()
-        self.ui.blockedSubredditsList.addItems(args['blockSubreddits']['content'])
+        self.ui.blockedSubredditsList.addItems(args["blockSubreddits"]["content"])
 
         self.ui.restrictedSubredditList.clear()
-        self.ui.restrictedSubredditList.addItems(args['restrictSubs'])
+        self.ui.restrictedSubredditList.addItems(args["restrictSubs"])
 
-        self.ui.blockNSFW.setChecked(args['blockNSFW'])
-        self.ui.notify.setChecked(args['notify'])
+        self.ui.blockNSFW.setChecked(args["blockNSFW"])
+        self.ui.notify.setChecked(args["notify"])
 
         self.ui.startingSort.setCurrentIndex(
-            self.ui.startingSort.findText(args['startingSort'], QtCore.Qt.MatchFixedString)
+            self.ui.startingSort.findText(
+                args["startingSort"], QtCore.Qt.MatchFixedString
+            )
         )
 
     def handle_normalize(self):
@@ -562,10 +648,13 @@ class MainWindow(QMainWindow):
         name = self.ui.startingSubreddit.text()
         if not checkSubreddit(name):
             QMessageBox.warning(
-                self, self.tr("Kularity"),
-                self.tr(f"r/{name} is invalid\n" + \
-                        "You should choose another subreddit."),
-                QMessageBox.Ok)
+                self,
+                self.tr("Kularity"),
+                self.tr(
+                    f"r/{name} is invalid\n" + "You should choose another subreddit."
+                ),
+                QMessageBox.Ok,
+            )
             self.ui.startingSubreddit.setText("all")
 
     def get_filtering_vars(self):
@@ -575,7 +664,7 @@ class MainWindow(QMainWindow):
         return [widget.item(i).text() for i in range(widget.count())]
 
     def handle_list(self, index):
-        fv = self.filterMapping[index]['widget']
+        fv = self.filterMapping[index]["widget"]
         items = self.get_listwidget_items(fv)
         return {
             "active": len(items) > 0,
@@ -584,10 +673,14 @@ class MainWindow(QMainWindow):
 
     def error(self, txt):
         QMessageBox.critical(
-            self, self.tr("Kularity"),
+            self,
+            self.tr("Kularity"),
             self.tr(txt),
             QMessageBox.Ok,
         )
+
+    def status(self, txt):
+        self.ui.status.setText(txt)
 
     def convert_args(self, args, to):
         def build_line(args):
@@ -599,36 +692,34 @@ class MainWindow(QMainWindow):
                 if v in (False, None):
                     continue
                 elif v is True:
-                    v = ''
+                    v = ""
 
                 if isinstance(v, (tuple, list)):
                     if len(v) == 0:
                         continue
-                    v = ' '.join([str(i) for i in v])
+                    v = " ".join([str(i) for i in v])
                 elif isinstance(v, dict):
-                    if not v['active'] or len(v['content']) == 0:
+                    if not v["active"] or len(v["content"]) == 0:
                         continue
-                    fn = os.path.join(os.environ['TEMP'], f'tmp-{k}.txt')
-                    with open(fn, 'w') as f:
-                        f.write('\n'.join(v['content']))
+                    fn = os.path.join(os.environ["TEMP"], f"tmp-{k}.txt")
+                    with open(fn, "w") as f:
+                        f.write("\n".join(v["content"]))
                     v = fn
 
                 if k == "dir":
                     v = f'"{v}"'
 
-                finalv = f" {v}" if v != '' else ""
+                finalv = f" {v}" if v != "" else ""
 
-                formattedArgs.append(f'--{k}{finalv}')
+                formattedArgs.append(f"--{k}{finalv}")
 
-            mainFile = os.path.join(
-                os.getcwd(), 'main.py'
-            )
+            mainFile = os.path.join(os.getcwd(), "main.py")
 
             return f'python {mainFile} {" ".join(formattedArgs)}'
 
-        if to == 'cmd':
+        if to == "cmd":
             return build_line(args)
-        elif to == 'bat':
+        elif to == "bat":
             return f"""@echo off
 title Kularity scraping
 rem Bypass "Terminate Batch Job" prompt.
